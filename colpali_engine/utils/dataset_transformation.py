@@ -255,6 +255,12 @@ class TestSetFactory:
         return dataset
 
 
+def load_eval_set() -> ColPaliEngineDataset:
+    dataset = load_dataset("vidore/colpali_train_set", split="test")
+    eval_dataset = ColPaliEngineDataset(dataset, pos_target_column_name="image")
+    return eval_dataset
+
+
 if __name__ == "__main__":
     ds = TestSetFactory("vidore/tabfquad_test_subsampled")()
     print(ds)
