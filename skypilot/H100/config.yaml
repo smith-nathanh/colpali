@@ -7,12 +7,24 @@ resources:
   ports: 8888
   any_of:
     - region: us-east4
+    - region: us-east5
     - region: us-west1
+    - region: us-west4
     - region: us-central1
 
 file_mounts:
   ~/sky_workdir/.env: ./.env
   ~/.gitconfig: ~/.gitconfig
+  
+  # COPY mode for datasets
+  /gcs/colqwen-ns-data:
+    source: gs://colqwen-ns-data
+    mode: COPY
+  
+  # MOUNT mode for models - auto-sync checkpoints and outputs
+  /gcs/colqwen-ns-models:
+    source: gs://colqwen-ns-models
+    mode: MOUNT
 
 workdir: .
 
@@ -105,3 +117,12 @@ setup: |
   echo 'source ~/sky_workdir/.venv/bin/activate' >> ~/.bashrc
 
   echo -e "\n\n============   SKYPILOT SETUP: Setup complete!   ============\n\n"
+
+run: |
+  echo "Starting ColBERT training..."
+  cd ~/sky_workdir
+  source .env
+  export WANDB_PROJECT="colqwen2_5"
+  export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+  export USE_LOCAL_DATASET=0
+  python scripts/train/train_colbert.py scripts/configs/qwen2_5/training_config_r2.yml

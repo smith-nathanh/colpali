@@ -9,12 +9,22 @@ from colpali_engine.data.dataset import ColPaliEngineDataset, Corpus
 USE_LOCAL_DATASET = os.environ.get("USE_LOCAL_DATASET", "1") == "1"
 
 
-def load_train_set() -> ColPaliEngineDataset:
-    dataset = load_dataset("vidore/colpali_train_set", split="train")
-
+def load_train_set(dataset_path: str = "vidore/colpali_train_set") -> ColPaliEngineDataset:
+    """
+    Loads the training set from the specified dataset path or huggingface repo.
+    """
+    dataset = load_dataset(dataset_path, split="train")
     train_dataset = ColPaliEngineDataset(dataset, pos_target_column_name="image")
-
     return train_dataset
+
+
+def load_eval_set(dataset_path: str = "vidore/colpali_train_set") -> ColPaliEngineDataset:
+    """
+    Loads the evaluation set from the specified dataset path.
+    """
+    dataset = load_dataset(dataset_path, split="test")
+    eval_dataset = ColPaliEngineDataset(dataset, pos_target_column_name="image")
+    return eval_dataset
 
 
 def load_train_set_ir(num_negs=0) -> ColPaliEngineDataset:
@@ -253,12 +263,6 @@ class TestSetFactory:
     def __call__(self, *args, **kwargs):
         dataset = load_dataset(self.dataset_path, split="test")
         return dataset
-
-
-def load_eval_set() -> ColPaliEngineDataset:
-    dataset = load_dataset("vidore/colpali_train_set", split="test")
-    eval_dataset = ColPaliEngineDataset(dataset, pos_target_column_name="image")
-    return eval_dataset
 
 
 if __name__ == "__main__":
