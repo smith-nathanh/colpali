@@ -13,7 +13,7 @@ from colpali_engine.data.dataset import ColPaliEngineDataset
 from colpali_engine.loss.late_interaction_losses import (
     ColbertLoss,
 )
-from colpali_engine.trainer.contrastive_trainer import ContrastiveTrainer
+from colpali_engine.trainer.contrastive_trainer import ContAccumTrainer
 from colpali_engine.utils.gpu_stats import print_gpu_utilization, print_summary
 from colpali_engine.utils.processing_utils import BaseVisualRetrieverProcessor
 
@@ -88,7 +88,8 @@ class ColModelTraining:
         )
 
     def train(self) -> None:
-        trainer = ContrastiveTrainer(
+        print("Starting training with ContAccumTrainer...")
+        trainer = ContAccumTrainer(
             model=self.model,
             train_dataset=self.train_dataset,
             eval_dataset=self.eval_dataset,
