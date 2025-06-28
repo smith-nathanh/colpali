@@ -33,12 +33,13 @@ classifiers = [
 ]
 
 dependencies = [
+    "gcsfs>=2025.3.0",
     "numpy",
     "peft>=0.14.0,<0.16.0",
     "pillow>=10.0.0",
     "requests",
     "scipy",
-    "torch>=2.5.0,<2.8.0",
+    "torch>=2.6.0,<2.7.0",
     "transformers>=4.51.1,<4.52.0",
 ]
 
