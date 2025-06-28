@@ -157,3 +157,34 @@ class ColbertPairwiseNegativeCELoss(torch.nn.Module):
             loss += F.softplus(neg_scores - pos_scores).mean()
 
         return loss / 2
+
+
+class ColbertContAccumInfoNCELoss(torch.nn.Module):
+    def __init__(self, temperature: float = 0.02, normalize_scores: bool = True):
+        super().__init__()
+        self.ce_loss = CrossEntropyLoss()
+        self.temperature = temperature
+        self.normalize_scores = normalize_scores
+
+    def forward(self, query_embeddings, doc_embeddings, num_current_queries=None):
+        if num_current_queries is None:
+            num_current_queries = query_embeddings.size(0)
+
+        # Current queries vs ALL docs (including cached)
+        current_queries = query_embeddings[:num_current_queries]
+        scores = torch.einsum("bnd,csd->bcns", current_queries, doc_embeddings).max(dim=3)[0].sum(dim=2)
+
+        if self.normalize_scores:
+            query_lengths = (current_queries[:, :, 0] != 0).sum(dim=1).unsqueeze(-1)
+            scores = scores / query_lengths
+
+            if not (scores >= 0).all().item() or not (scores <= 1).all().item():
+                raise ValueError("Scores must be between 0 and 1 after normalization")
+
+        # Targets: positive documents are at indices [0, 1, 2, ..., num_current_queries-1]
+        targets = torch.arange(num_current_queries, device=scores.device)
+
+        # InfoNCE loss with temperature, following ColbertLoss pattern
+        loss = self.ce_loss(scores / self.temperature, targets)
+
+        return loss

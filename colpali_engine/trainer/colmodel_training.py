@@ -5,6 +5,7 @@ from typing import Callable, List, Optional, Union
 from peft import LoraConfig, PeftModel, get_peft_model
 from transformers import (
     PreTrainedModel,
+    TrainerCallback,
     TrainingArguments,
 )
 
@@ -68,7 +69,45 @@ class ColModelTrainingConfig:
             else:
                 print(f"Adapter already loaded from {self.pretrained_peft_model_name_or_path}. Not overwriting.")
 
-    print_gpu_utilization()
+        # Enable training for all existing LoRA adapters
+        if hasattr(self.model, "peft_config") and self.model.peft_config:
+            print("Found existing LoRA adapters. Setting all adapters to trainable.")
+            for adapter_name in self.model.peft_config.keys():
+                if hasattr(self.model, "enable_adapters"):
+                    self.model.enable_adapters()
+                # Set adapter to trainable
+                if hasattr(self.model, "set_adapter_trainable"):
+                    self.model.set_adapter_trainable(adapter_name, True)
+                else:
+                    # Fallback: manually set requires_grad for adapter parameters
+                    for name, param in self.model.named_parameters():
+                        if "lora_" in name.lower():
+                            param.requires_grad = True
+
+            if hasattr(self.model, "print_trainable_parameters"):
+                self.model.print_trainable_parameters()
+
+        print_gpu_utilization()
+
+
+class CacheClearCallback(TrainerCallback):
+    def __init__(self, trainer):
+        self.trainer = trainer
+
+    def on_epoch_begin(self, args, state, control, **kwargs):
+        """Clear cache at the beginning of each epoch"""
+        print(f"[CALLBACK] on_epoch_begin called - epoch {state.epoch}")
+
+        # Clear the trainer's cache
+        cache_sizes_before = (
+            len(self.trainer.query_cache),
+            len(self.trainer.doc_cache),
+        )
+        self.trainer.query_cache.clear()
+        self.trainer.doc_cache.clear()
+
+        print(f"[CALLBACK] Cache cleared at epoch {state.epoch}")
+        print(f"[CALLBACK] Cache sizes before clear: query={cache_sizes_before[0]}, doc={cache_sizes_before[1]}")
 
 
 class ColModelTraining:
@@ -88,7 +127,6 @@ class ColModelTraining:
         )
 
     def train(self) -> None:
-        print("Starting training with ContAccumTrainer...")
         trainer = ContAccumTrainer(
             model=self.model,
             train_dataset=self.train_dataset,
@@ -98,8 +136,16 @@ class ColModelTraining:
             loss_func=self.config.loss_func,
             is_vision_model=self.config.processor is not None,
         )
+        # print which trainer is being used
+        print(f"[SETUP] Using trainer: {type(trainer).__name__}")
 
         trainer.args.remove_unused_columns = False
+
+        # Only add cache callback for ContAccumTrainer
+        if isinstance(trainer, ContAccumTrainer):
+            cache_callback = CacheClearCallback(trainer)
+            trainer.add_callback(cache_callback)
+            print(f"[SETUP] Added cache clearing callback for {type(trainer).__name__}")
 
         result = trainer.train(resume_from_checkpoint=self.config.tr_args.resume_from_checkpoint)
         print_summary(result)

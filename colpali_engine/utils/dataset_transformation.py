@@ -9,7 +9,7 @@ from colpali_engine.data.dataset import ColPaliEngineDataset, Corpus
 USE_LOCAL_DATASET = os.environ.get("USE_LOCAL_DATASET", "1") == "1"
 
 
-def load_train_set(dataset_path: str = "vidore/colpali_train_set") -> ColPaliEngineDataset:
+def load_train_set(dataset_path: str = "smith-nathanh/finance-dataset") -> ColPaliEngineDataset:
     """
     Loads the training set from the specified dataset path or huggingface repo.
     """
@@ -18,11 +18,11 @@ def load_train_set(dataset_path: str = "vidore/colpali_train_set") -> ColPaliEng
     return train_dataset
 
 
-def load_eval_set(dataset_path: str = "vidore/colpali_train_set") -> ColPaliEngineDataset:
+def load_eval_set(dataset_path: str = "smith-nathanh/finance-dataset") -> ColPaliEngineDataset:
     """
     Loads the evaluation set from the specified dataset path.
     """
-    dataset = load_dataset(dataset_path, split="test")
+    dataset = load_dataset(dataset_path, split="validation")
     eval_dataset = ColPaliEngineDataset(dataset, pos_target_column_name="image")
     return eval_dataset
 

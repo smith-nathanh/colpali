@@ -8,6 +8,7 @@ from transformers import Trainer, is_datasets_available
 from transformers.trainer_utils import seed_worker
 
 from colpali_engine.data.sampler import SingleDatasetBatchSampler
+from colpali_engine.loss.late_interaction_losses import ColbertLoss
 
 
 class ContrastiveTrainer(Trainer):
@@ -208,7 +209,7 @@ class DistContrastiveTrainer(ContrastiveTrainer):
 
 
 class ContAccumTrainer(ContrastiveTrainer):
-    def __init__(self, cache_size=8, **kwargs):
+    def __init__(self, cache_size=7, **kwargs):
         super().__init__(**kwargs)
         self.cache_size = cache_size
         self.query_cache = deque(maxlen=self.cache_size)
@@ -221,14 +222,12 @@ class ContAccumTrainer(ContrastiveTrainer):
         padded_tensors = []
         for tensor in tensors:
             if tensor.size(1) < max_seq_len:
-                batch_size, seq_len, hidden_size = tensor.shape
-                padding_size = max_seq_len - seq_len
                 padding = torch.zeros(
-                    batch_size,
-                    padding_size,
-                    hidden_size,
-                    device=tensor.device,
+                    tensor.size(0),
+                    max_seq_len - tensor.size(1),
+                    tensor.size(2),
                     dtype=tensor.dtype,
+                    device=tensor.device,
                 )
                 padded_tensor = torch.cat([tensor, padding], dim=1)
             else:
@@ -242,24 +241,14 @@ class ContAccumTrainer(ContrastiveTrainer):
         if not prediction_loss_only:
             raise ValueError("prediction_step is only called with prediction_loss_only=True")
 
-        # Temporarily clear cache for clean evaluation
-        old_query_cache = self.query_cache.copy()
-        old_doc_cache = self.doc_cache.copy()
-        self.query_cache.clear()
-        self.doc_cache.clear()
+        with torch.no_grad():
+            doc_outputs = model(**{k[4:]: v for k, v in inputs.items() if k.startswith("doc")})
+            query_outputs = model(input_ids=inputs["query_input_ids"], attention_mask=inputs["query_attention_mask"])
 
-        try:
-            with torch.no_grad():
-                doc_outputs = model(**{k[4:]: v for k, v in inputs.items() if k.startswith("doc")})
-                query_outputs = model(
-                    input_ids=inputs["query_input_ids"], attention_mask=inputs["query_attention_mask"]
-                )
-                loss = self.loss_func(query_outputs, doc_outputs)
-                return loss, None, None
-        finally:
-            # Restore cache after evaluation
-            self.query_cache = old_query_cache
-            self.doc_cache = old_doc_cache
+            eval_loss_func = ColbertLoss(temperature=0.02)
+            loss = eval_loss_func(query_outputs, doc_outputs)
+
+            return loss, None, None
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         query_outputs = model(
@@ -267,6 +256,8 @@ class ContAccumTrainer(ContrastiveTrainer):
             attention_mask=inputs["query_attention_mask"],
         )
         doc_outputs = model(**{k[4:]: v for k, v in inputs.items() if k.startswith("doc")})
+
+        num_current_queries = query_outputs.size(0)
 
         # Concat the embeddings with the cache
         if len(self.query_cache) > 0:
@@ -283,7 +274,7 @@ class ContAccumTrainer(ContrastiveTrainer):
         else:
             doc_with_cache = doc_outputs
 
-        loss = self.loss_func(query_with_cache, doc_with_cache)
+        loss = self.loss_func(query_with_cache, doc_with_cache, num_current_queries)
 
         # Cache the embedding outputs for future use
         self.query_cache.append(query_outputs.detach().clone())
