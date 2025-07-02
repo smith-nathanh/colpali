@@ -73,8 +73,8 @@ class ColModelTrainingConfig:
         if hasattr(self.model, "peft_config") and self.model.peft_config:
             print("Found existing LoRA adapters. Setting all adapters to trainable.")
             for adapter_name in self.model.peft_config.keys():
-                if hasattr(self.model, "enable_adapters"):
-                    self.model.enable_adapters()
+                # if hasattr(self.model, "enable_adapters"):
+                #     self.model.enable_adapters()
                 # Set adapter to trainable
                 if hasattr(self.model, "set_adapter_trainable"):
                     self.model.set_adapter_trainable(adapter_name, True)
@@ -100,14 +100,18 @@ class CacheClearCallback(TrainerCallback):
 
         # Clear the trainer's cache
         cache_sizes_before = (
-            len(self.trainer.query_cache),
-            len(self.trainer.doc_cache),
+            # len(self.trainer.accumulated_queries),
+            # len(self.trainer.accumulated_docs),
+            len(self.trainer.accumulated_inputs) if hasattr(self.trainer, "accumulated_inputs") else 0,
         )
-        self.trainer.query_cache.clear()
-        self.trainer.doc_cache.clear()
+        # self.trainer.accumulated_queries.clear()
+        # self.trainer.accumulated_docs.clear()
+        self.trainer.accumulated_inputs.clear()
 
         print(f"[CALLBACK] Cache cleared at epoch {state.epoch}")
-        print(f"[CALLBACK] Cache sizes before clear: query={cache_sizes_before[0]}, doc={cache_sizes_before[1]}")
+        print(
+            f"[CALLBACK] Cache sizes before clear: inputs={cache_sizes_before}"
+        )  # query={cache_sizes_before[0]}, doc={cache_sizes_before[1]},
 
 
 class ColModelTraining:
@@ -142,10 +146,10 @@ class ColModelTraining:
         trainer.args.remove_unused_columns = False
 
         # Only add cache callback for ContAccumTrainer
-        if isinstance(trainer, ContAccumTrainer):
-            cache_callback = CacheClearCallback(trainer)
-            trainer.add_callback(cache_callback)
-            print(f"[SETUP] Added cache clearing callback for {type(trainer).__name__}")
+        # if isinstance(trainer, ContAccumTrainer):
+        #     cache_callback = CacheClearCallback(trainer)
+        #     trainer.add_callback(cache_callback)
+        #     print(f"[SETUP] Added cache clearing callback for {type(trainer).__name__}")
 
         result = trainer.train(resume_from_checkpoint=self.config.tr_args.resume_from_checkpoint)
         print_summary(result)

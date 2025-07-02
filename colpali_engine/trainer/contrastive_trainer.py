@@ -1,5 +1,3 @@
-from collections import deque
-
 import torch
 import torch.distributed as dist
 from datasets import DatasetDict
@@ -8,7 +6,6 @@ from transformers import Trainer, is_datasets_available
 from transformers.trainer_utils import seed_worker
 
 from colpali_engine.data.sampler import SingleDatasetBatchSampler
-from colpali_engine.loss.late_interaction_losses import ColbertLoss
 
 
 class ContrastiveTrainer(Trainer):
@@ -209,18 +206,89 @@ class DistContrastiveTrainer(ContrastiveTrainer):
 
 
 class ContAccumTrainer(ContrastiveTrainer):
-    def __init__(self, cache_size=7, **kwargs):
+    def __init__(self, cache_size=4, **kwargs):
         super().__init__(**kwargs)
         self.cache_size = cache_size
-        self.query_cache = deque(maxlen=self.cache_size)
-        self.doc_cache = deque(maxlen=self.cache_size)
+        self.accumulated_inputs = []
+        self.accumulation_step = 0
 
-    def _pad_to_max_length(self, tensors):
+        # Override gradient accumulation steps to match cache size
+        if hasattr(self.args, "gradient_accumulation_steps"):
+            if self.args.gradient_accumulation_steps != cache_size:
+                print(
+                    f"[WARNING] Overriding gradient_accumulation_steps from "
+                    f"{self.args.gradient_accumulation_steps} to {cache_size}"
+                )
+            self.args.gradient_accumulation_steps = cache_size
+
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        query_outputs = model(
+            input_ids=inputs["query_input_ids"],
+            attention_mask=inputs["query_attention_mask"],
+        )
+        doc_outputs = model(**{k[4:]: v for k, v in inputs.items() if k.startswith("doc")})
+
+        # During eval, compute loss normally without accumulation
+        if not model.training:
+            loss = self.loss_func(query_outputs, doc_outputs)
+            return (loss, (query_outputs, doc_outputs)) if return_outputs else loss
+
+        self.accumulation_step += 1
+        # For the final step, compute fresh embeddings for ALL accumulated batches
+        if self.accumulation_step >= self.cache_size:
+            all_queries = []
+            all_docs = []
+
+            # Re-compute embeddings for all accumulated inputs
+            for stored_inputs in self.accumulated_inputs:
+                q_out = model(
+                    input_ids=stored_inputs["query_input_ids"],
+                    attention_mask=stored_inputs["query_attention_mask"],
+                )
+                d_out = model(**{k[4:]: v for k, v in stored_inputs.items() if k.startswith("doc")})
+                all_queries.append(q_out)
+                all_docs.append(d_out)
+
+            # Add current batch
+            all_queries.append(query_outputs)
+            all_docs.append(doc_outputs)
+
+            # Compute loss on all fresh embeddings
+            combined_queries = self._pad_and_concat(all_queries)
+            combined_docs = self._pad_and_concat(all_docs)
+
+            loss = self.loss_func(combined_queries, combined_docs)
+
+            # Clear accumulated data
+            self.accumulated_inputs.clear()
+            self.accumulation_step = 0
+
+            return (loss, (combined_queries, combined_docs)) if return_outputs else loss
+        else:
+            # Store the inputs (not the embeddings) for later recomputation
+            current_inputs = {
+                "query_input_ids": inputs["query_input_ids"].clone(),
+                "query_attention_mask": inputs["query_attention_mask"].clone(),
+            }
+            for k, v in inputs.items():
+                if k.startswith("doc"):
+                    current_inputs[k] = v.clone()
+
+            self.accumulated_inputs.append(current_inputs)
+
+            # Return zero loss for intermediate steps (no backward)
+            return torch.tensor(0.0, device=query_outputs.device, requires_grad=True)
+
+    def _pad_and_concat(self, tensor_list):
+        """Pad tensors to same length and concatenate along batch dimension"""
+        if len(tensor_list) == 1:
+            return tensor_list[0]
+
         # Find maximum sequence length
-        max_seq_len = max(tensor.size(1) for tensor in tensors)
+        max_seq_len = max(tensor.size(1) for tensor in tensor_list)
 
         padded_tensors = []
-        for tensor in tensors:
+        for tensor in tensor_list:
             if tensor.size(1) < max_seq_len:
                 padding = torch.zeros(
                     tensor.size(0),
@@ -234,50 +302,4 @@ class ContAccumTrainer(ContrastiveTrainer):
                 padded_tensor = tensor
             padded_tensors.append(padded_tensor)
 
-        return padded_tensors
-
-    def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=True):
-        """Override to ensure clean evaluation without cache contamination."""
-        if not prediction_loss_only:
-            raise ValueError("prediction_step is only called with prediction_loss_only=True")
-
-        with torch.no_grad():
-            doc_outputs = model(**{k[4:]: v for k, v in inputs.items() if k.startswith("doc")})
-            query_outputs = model(input_ids=inputs["query_input_ids"], attention_mask=inputs["query_attention_mask"])
-
-            eval_loss_func = ColbertLoss(temperature=0.02)
-            loss = eval_loss_func(query_outputs, doc_outputs)
-
-            return loss, None, None
-
-    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
-        query_outputs = model(
-            input_ids=inputs["query_input_ids"],
-            attention_mask=inputs["query_attention_mask"],
-        )
-        doc_outputs = model(**{k[4:]: v for k, v in inputs.items() if k.startswith("doc")})
-
-        num_current_queries = query_outputs.size(0)
-
-        # Concat the embeddings with the cache
-        if len(self.query_cache) > 0:
-            all_query_tensors = [query_outputs] + [q.detach() for q in self.query_cache]
-            padded_query_tensors = self._pad_to_max_length(all_query_tensors)
-            query_with_cache = torch.cat(padded_query_tensors, dim=0).to(query_outputs.device)
-        else:
-            query_with_cache = query_outputs
-
-        if len(self.doc_cache) > 0:
-            all_doc_tensors = [doc_outputs] + [d.detach() for d in self.doc_cache]
-            padded_doc_tensors = self._pad_to_max_length(all_doc_tensors)
-            doc_with_cache = torch.cat(padded_doc_tensors, dim=0).to(doc_outputs.device)
-        else:
-            doc_with_cache = doc_outputs
-
-        loss = self.loss_func(query_with_cache, doc_with_cache, num_current_queries)
-
-        # Cache the embedding outputs for future use
-        self.query_cache.append(query_outputs.detach().clone())
-        self.doc_cache.append(doc_outputs.detach().clone())
-
-        return (loss, (query_with_cache, doc_with_cache)) if return_outputs else loss
+        return torch.cat(padded_tensors, dim=0)
