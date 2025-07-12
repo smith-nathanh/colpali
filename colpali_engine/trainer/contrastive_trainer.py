@@ -206,20 +206,10 @@ class DistContrastiveTrainer(ContrastiveTrainer):
 
 
 class ContAccumTrainer(ContrastiveTrainer):
-    def __init__(self, cache_size=4, **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.cache_size = cache_size
         self.accumulated_inputs = []
         self.accumulation_step = 0
-
-        # Override gradient accumulation steps to match cache size
-        if hasattr(self.args, "gradient_accumulation_steps"):
-            if self.args.gradient_accumulation_steps != cache_size:
-                print(
-                    f"[WARNING] Overriding gradient_accumulation_steps from "
-                    f"{self.args.gradient_accumulation_steps} to {cache_size}"
-                )
-            self.args.gradient_accumulation_steps = cache_size
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         query_outputs = model(
@@ -235,7 +225,7 @@ class ContAccumTrainer(ContrastiveTrainer):
 
         self.accumulation_step += 1
         # For the final step, compute fresh embeddings for ALL accumulated batches
-        if self.accumulation_step >= self.cache_size:
+        if self.accumulation_step >= self.args.gradient_accumulation_steps:
             all_queries = []
             all_docs = []
 

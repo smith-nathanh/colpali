@@ -57,24 +57,24 @@ class ColModelTrainingConfig:
 
         self.tr_args.remove_unused_columns = False
 
+        # Check if model already has PEFT config
+        model_has_peft = hasattr(self.model, "peft_config") and self.model.peft_config
+
         if self.pretrained_peft_model_name_or_path is not None:
             print("Loading pretrained PEFT model")
             self.model.load_adapter(self.pretrained_peft_model_name_or_path, is_trainable=True)
 
         if self.peft_config is not None:
-            print("Configurating PEFT model")
-            if self.pretrained_peft_model_name_or_path is None:
-                self.model = get_peft_model(self.model, self.peft_config)
-                self.model.print_trainable_parameters()
+            if model_has_peft:
+                print("Model already has PEFT config. Skipping new PEFT configuration to preserve existing setup.")
             else:
-                print(f"Adapter already loaded from {self.pretrained_peft_model_name_or_path}. Not overwriting.")
+                print("Configurating PEFT model")
+                self.model = get_peft_model(self.model, self.peft_config)
 
         # Enable training for all existing LoRA adapters
         if hasattr(self.model, "peft_config") and self.model.peft_config:
             print("Found existing LoRA adapters. Setting all adapters to trainable.")
             for adapter_name in self.model.peft_config.keys():
-                # if hasattr(self.model, "enable_adapters"):
-                #     self.model.enable_adapters()
                 # Set adapter to trainable
                 if hasattr(self.model, "set_adapter_trainable"):
                     self.model.set_adapter_trainable(adapter_name, True)
@@ -84,8 +84,17 @@ class ColModelTrainingConfig:
                         if "lora_" in name.lower():
                             param.requires_grad = True
 
-            if hasattr(self.model, "print_trainable_parameters"):
-                self.model.print_trainable_parameters()
+        # Always print trainable parameters at the end
+        if hasattr(self.model, "print_trainable_parameters"):
+            self.model.print_trainable_parameters()
+        else:
+            # Fallback for non-PEFT models
+            trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+            all_params = sum(p.numel() for p in self.model.parameters())
+            trainable_percent = 100 * trainable_params / all_params
+            print(
+                f"trainable params: {trainable_params:,} || all params: {all_params:,} || trainable%: {trainable_percent:.4f}%"
+            )
 
         print_gpu_utilization()
 
