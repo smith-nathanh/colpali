@@ -8,7 +8,7 @@ resources:
   any_of:
     - region: us-east4
     - region: us-east5
-    - region: us-west1
+    #- region: us-west1
     - region: us-west4
     - region: us-central1
 
@@ -125,4 +125,4 @@ run: |
   export WANDB_PROJECT="colqwen2_5"
   export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
   export USE_LOCAL_DATASET=0
-  python scripts/train/train_colbert.py scripts/configs/qwen2_5/training_config_r5.yml
+  python scripts/train/train_colbert.py scripts/configs/qwen2_5/training_config_r6.yml

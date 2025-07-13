@@ -171,3 +171,6 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 *.ipynb
+
+scripts/configs/qwen2_5/*
+notes.txt
