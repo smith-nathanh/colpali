@@ -172,5 +172,4 @@ cython_debug/
 #.idea/
 *.ipynb
 
-scripts/configs/qwen2_5/*
 notes.txt

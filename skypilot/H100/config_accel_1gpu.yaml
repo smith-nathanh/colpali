@@ -194,4 +194,4 @@ run: |
   echo "Starting ColBERT training..."
   cd ~/sky_workdir
   source .env
-  accelerate launch scripts/train/train_colbert.py scripts/configs/qwen2_5/config_colbertloss_cacheaccum_12.yml
+  accelerate launch scripts/train/train_colbert.py scripts/configs/qwen2_5/config_colbertloss_cacheaccum_13.yml

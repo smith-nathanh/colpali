@@ -1,0 +1,84 @@
+config:
+  (): colpali_engine.trainer.colmodel_training.ColModelTrainingConfig
+  output_dir: /gcs/colqwen-ns-models/colbertloss_cacheaccum_1
+  processor:
+    (): colpali_engine.utils.transformers_wrappers.AllPurposeWrapper
+    class_to_instanciate: !ext colpali_engine.models.ColQwen2_5_Processor
+    pretrained_model_name_or_path: vidore/colqwen2.5-v0.2
+    # num_image_tokens: 2048
+    # max_length: 50
+
+  model:
+    (): colpali_engine.utils.transformers_wrappers.AllPurposeWrapper
+    class_to_instanciate: !ext colpali_engine.models.ColQwen2_5
+    pretrained_model_name_or_path: vidore/colqwen2.5-v0.2
+    torch_dtype:  !ext torch.bfloat16
+    use_cache: false
+    attn_implementation: "flash_attention_2"
+#    device_map: "auto"
+#    quantization_config:
+#      (): transformers.BitsAndBytesConfig
+#      load_in_4bit: true
+#      bnb_4bit_quant_type: "nf4"
+#      bnb_4bit_compute_dtype:  "bfloat16"
+#      bnb_4bit_use_double_quant: true
+
+  #dataset_loading_func: !ext colpali_engine.utils.dataset_transformation.load_train_set
+  #eval_dataset_loader: !import ../data/test_data.yaml
+  train_dataset:
+    (): colpali_engine.utils.dataset_transformation.load_train_set
+    #dataset_path: /gcs/colqwen-ns-data/colpali_train_set
+  eval_dataset:
+    (): colpali_engine.utils.dataset_transformation.load_eval_set
+    #dataset_path: /gcs/colqwen-ns-data/colpali_train_set
+
+
+  # max_length: 50
+  run_eval: true
+  loss_func:
+    (): colpali_engine.loss.late_interaction_losses.ColbertLoss
+    temperature: 0.2
+  tr_args:
+    (): transformers.training_args.TrainingArguments
+    output_dir: null
+    overwrite_output_dir: true
+    num_train_epochs: 3
+    #max_steps: 616
+    per_device_train_batch_size: 32
+    gradient_checkpointing: true
+    gradient_checkpointing_kwargs: { "use_reentrant": false }
+    max_grad_norm: 2.0
+    #ddp_find_unused_parameters: false
+    #ddp_backend: "nccl"
+    gradient_accumulation_steps: 4
+    per_device_eval_batch_size: 16
+    eval_strategy: "steps"
+    dataloader_num_workers: 8
+    bf16: true
+    #tf32: true
+    save_steps: 100
+    logging_steps: 5
+    eval_steps: 10
+    #warmup_steps: 500
+    warmup_ratio: 0.1
+    learning_rate: 2e-5
+    #lr_scheduler_type: "cosine"
+    save_total_limit: 3
+    #resume_from_checkpoint: true
+    optim: "paged_adamw_8bit"
+    run_name: "colbertloss_cacheaccum_1"
+    report_to: "wandb"
+    # uses ContAccumTrainer
+
+
+  # peft_config:
+  #   (): peft.LoraConfig
+  #   r: 32
+  #   lora_alpha: 32
+  #   lora_dropout: 0.1
+  #   init_lora_weights: "gaussian"
+  #   bias: "none"
+  #   task_type: "FEATURE_EXTRACTION"
+  #   #target_modules: '(.*(model).*(k_proj|q_proj|v_proj|o_proj).*$|.*(custom_text_proj).*$)' # only attention and custom text projection
+  #   target_modules: '(.*(model).*(down_proj|gate_proj|up_proj|k_proj|q_proj|v_proj|o_proj).*$|.*(custom_text_proj).*$)'
+  #   # target_modules: '(.*(language_model).*(down_proj|gate_proj|up_proj|k_proj|q_proj|v_proj|o_proj).*$|.*(custom_text_proj).*$)'
