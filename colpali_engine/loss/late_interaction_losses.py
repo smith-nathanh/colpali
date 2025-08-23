@@ -16,25 +16,37 @@ class ColbertLoss(torch.nn.Module):
         self.temperature = temperature
         self.normalize_scores = normalize_scores
 
-    def forward(self, query_embeddings, doc_embeddings):
+    def forward(self, query_embeddings, doc_embeddings, neg_doc_embeddings=None):
         """
         query_embeddings: (batch_size, num_query_tokens, dim)
         doc_embeddings: (batch_size, num_doc_tokens, dim)
+        neg_doc_embeddings: (batch_size, num_neg_doc_tokens, dim), optional
         """
-
+        # Compute in-batch scores (always computed)
         scores = torch.einsum("bnd,csd->bcns", query_embeddings, doc_embeddings).max(dim=3)[0].sum(dim=2)
 
         if self.normalize_scores:
-            # find lengths of non-zero query embeddings
-            # divide scores by the lengths of the query embeddings
-            scores = scores / ((query_embeddings[:, :, 0] != 0).sum(dim=1).unsqueeze(-1))
+            query_lengths = (query_embeddings[:, :, 0] != 0).sum(dim=1).unsqueeze(-1)
+            scores = scores / (query_lengths + 1e-8)
 
-            if not (scores >= 0).all().item() or not (scores <= 1).all().item():
-                raise ValueError("Scores must be between 0 and 1 after normalization")
+        if neg_doc_embeddings is not None:
+            # Compute positive scores (diagonal)
+            pos_scores = scores.diagonal().unsqueeze(1)  # (batch_size, 1)
 
-        loss_rowwise = self.ce_loss(scores / self.temperature, torch.arange(scores.shape[0], device=scores.device))
+            # Compute negative scores
+            neg_scores = torch.einsum("bnd,bsd->bns", query_embeddings, neg_doc_embeddings).max(dim=2)[0].sum(dim=1)
+            if self.normalize_scores:
+                neg_scores = neg_scores / (query_lengths.squeeze(-1) + 1e-8)
+            neg_scores = neg_scores.unsqueeze(1)  # (batch_size, 1)
 
-        return loss_rowwise
+            # Concatenate positive and negative scores
+            all_scores = torch.cat([pos_scores, neg_scores], dim=1)  # (batch_size, 2)
+            targets = torch.zeros(all_scores.shape[0], dtype=torch.long, device=all_scores.device)
+
+            return self.ce_loss(all_scores / self.temperature, targets)
+        else:
+            # Original behavior: in-batch negatives only
+            return self.ce_loss(scores / self.temperature, torch.arange(scores.shape[0], device=scores.device))
 
 
 class ColbertNegativeCELoss(torch.nn.Module):
@@ -52,31 +64,39 @@ class ColbertNegativeCELoss(torch.nn.Module):
         self.normalize_scores = normalize_scores
         self.in_batch_term = in_batch_term
 
-    def forward(self, query_embeddings, doc_embeddings, neg_doc_embeddings):
+    def forward(self, query_embeddings, doc_embeddings, neg_doc_embeddings=None):
         """
         query_embeddings: (batch_size, num_query_tokens, dim)
         doc_embeddings: (batch_size, num_doc_tokens, dim)
-        neg_doc_embeddings: (batch_size, num_neg_doc_tokens, dim)
+        neg_doc_embeddings: (batch_size, num_neg_doc_tokens, dim), optional
         """
 
-        # Compute the ColBERT scores
-        pos_scores = torch.einsum("bnd,bsd->bns", query_embeddings, doc_embeddings).max(dim=2)[0].sum(dim=1)
-        neg_scores = torch.einsum("bnd,bsd->bns", query_embeddings, neg_doc_embeddings).max(dim=2)[0].sum(dim=1)
+        if neg_doc_embeddings is not None:
+            # Compute the ColBERT scores
+            pos_scores = torch.einsum("bnd,bsd->bns", query_embeddings, doc_embeddings).max(dim=2)[0].sum(dim=1)
+            neg_scores = torch.einsum("bnd,bsd->bns", query_embeddings, neg_doc_embeddings).max(dim=2)[0].sum(dim=1)
 
-        loss = F.softplus(neg_scores / self.temperature - pos_scores / self.temperature).mean()
+            loss = F.softplus(neg_scores / self.temperature - pos_scores / self.temperature).mean()
 
-        if self.in_batch_term:
+            if self.in_batch_term:
+                scores = torch.einsum("bnd,csd->bcns", query_embeddings, doc_embeddings).max(dim=3)[0].sum(dim=2)
+                if self.normalize_scores:
+                    # find lengths of non-zero query embeddings
+                    # divide scores by the lengths of the query embeddings
+                    query_lengths = (query_embeddings[:, :, 0] != 0).sum(dim=1).unsqueeze(-1)
+                    scores = scores / (query_lengths + 1e-8)
+                loss += self.ce_loss(scores / self.temperature, torch.arange(scores.shape[0], device=scores.device))
+
+            return loss / 2
+        else:
+            # When no negatives are provided (e.g., during evaluation), compute only in-batch loss
             scores = torch.einsum("bnd,csd->bcns", query_embeddings, doc_embeddings).max(dim=3)[0].sum(dim=2)
             if self.normalize_scores:
                 # find lengths of non-zero query embeddings
                 # divide scores by the lengths of the query embeddings
-                scores = scores / ((query_embeddings[:, :, 0] != 0).sum(dim=1).unsqueeze(-1))
-
-                if not (scores >= 0).all().item() or not (scores <= 1).all().item():
-                    raise ValueError("Scores must be between 0 and 1 after normalization")
-            loss += self.ce_loss(scores / self.temperature, torch.arange(scores.shape[0], device=scores.device))
-
-        return loss / 2
+                query_lengths = (query_embeddings[:, :, 0] != 0).sum(dim=1).unsqueeze(-1)
+                scores = scores / (query_lengths + 1e-8)
+            return self.ce_loss(scores / self.temperature, torch.arange(scores.shape[0], device=scores.device))
 
 
 class ColbertPairwiseCELoss(torch.nn.Module):

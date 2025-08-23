@@ -1,7 +1,7 @@
 import os
 from typing import List, Tuple, cast
 
-from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset
+from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from PIL import Image
 
 from colpali_engine.data.dataset import ColPaliEngineDataset, Corpus
@@ -27,12 +27,25 @@ def load_eval_set(dataset_path: str = "smith-nathanh/finance-dataset") -> ColPal
     return eval_dataset
 
 
-def load_train_set_ir(num_negs=0) -> ColPaliEngineDataset:
+def load_train_set_ir(
+    num_negs: int = 5,
+    query_dataset_path: str = "manu/colpali-queries",
+    corpus_dataset_path: str = "manu/colpali-corpus",
+) -> ColPaliEngineDataset:
     """Returns the query dataset, then the anchor dataset with the documents, then the dataset type"""
-    corpus_data = load_dataset("manu/colpali-corpus", split="train")
+
+    print(f"Loading corpus from: {corpus_dataset_path}")
+    if os.path.isdir(corpus_dataset_path):
+        corpus_data = load_from_disk(corpus_dataset_path)
+    else:
+        corpus_data = load_dataset(corpus_dataset_path, split="train")
     corpus = Corpus(corpus_data=corpus_data, doc_column_name="image")
 
-    dataset = load_dataset("manu/colpali-queries", split="train")
+    print(f"Loading query set from: {query_dataset_path}")
+    if os.path.isdir(query_dataset_path):
+        dataset = load_from_disk(query_dataset_path)
+    else:
+        dataset = load_dataset(query_dataset_path, split="train")
 
     print("Dataset size:", len(dataset))
     # filter out queries with "gold_in_top_100" == False
