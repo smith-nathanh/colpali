@@ -22,9 +22,10 @@ scripts/configs/<model_name>/
 From a config you can trace:
 - Model name and architecture
 - Training / evaluation dataset sources
+- Loss function
 - Hyperparameters
 - LoRA configuration
-- Loss function
+
 
 Datasets can be declared in the config (preferred) instead of hardcoding inside `colpali_engine.utils.dataset_transformation`.
 
@@ -38,7 +39,7 @@ eval_dataset:
   dataset_path: smith-nathanh/finance-dataset
 ```
 
-Underlying loader functions:
+Underlying loader functions in `colpali_engine.utils.dataset_transformation`:
 ```python
 def load_train_set(dataset_path: str = "smith-nathanh/finance-dataset") -> ColPaliEngineDataset:
     dataset = load_dataset(dataset_path, split="train")
@@ -49,12 +50,12 @@ def load_eval_set(dataset_path: str = "smith-nathanh/finance-dataset") -> ColPal
     return ColPaliEngineDataset(dataset, pos_target_column_name="image")
 ```
 
-Finance dataset reference:
+Current training/validation/test set is at:
 ```
 https://huggingface.co/datasets/smith-nathanh/finance-dataset
 ```
-
-Hard negative mining datasets are saved on my GCS.
+In developing this dataset I followed a similar protocol to the `vidore/colpali_train_set` but it is composed of strictly finance related content.
+Hard negative mining datasets are saved on my GCS currently. 
 
 ### Customizing Trainer and Loss
 
@@ -63,7 +64,7 @@ The Trainer objects are in:
 colpali_engine/trainer/contrastive_trainer.py
 ```
 
-Trainer class cannot currently be set via config. You must specify which trainer class to instantiate:
+Trainer class cannot currently be set via config. You must specify which trainer class to use within:
 ```
 colpali_engine/trainer/colmodel_training.py
 ```
