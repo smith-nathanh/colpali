@@ -133,3 +133,6 @@ vidore-benchmark evaluate-retriever \
   --dataset-format qa
 ```
 
+## Resources
+
+Training is GPU resource intensive such that training ColQwen2.5 series with LoRA still may require more than 40GB of VRAM. Use small models such as `vidore/ColSmolVLM-Instruct-256M-base` to keep the GPU requirements very low such as under 10GB VRAM. 

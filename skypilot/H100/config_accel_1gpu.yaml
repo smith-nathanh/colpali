@@ -184,14 +184,14 @@ setup: |
   echo 'export TORCH_CUDNN_V8_API_ENABLED=1' >> ~/.bashrc
 
   # Set environment variables for training
-  echo 'export WANDB_PROJECT="finance-hardneg"' >> ~/.bashrc
+  echo 'export WANDB_PROJECT="finance-colsmol"' >> ~/.bashrc
   echo 'export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True' >> ~/.bashrc
   echo 'export USE_LOCAL_DATASET=0' >> ~/.bashrc
 
   echo "========== Distributed setup verification complete =========="
 
-# run: |
-#   echo "Starting ColBERT training..."
-#   cd ~/sky_workdir
-#   source .env
-#   accelerate launch scripts/train/train_colbert.py scripts/configs/qwen2_5/config_hardneg_1.yml
+run: |
+  echo "Starting ColBERT training..."
+  cd ~/sky_workdir
+  source .env
+  accelerate launch scripts/train/train_colbert.py scripts/configs/idefics/train_colsmol-256-base.yaml
