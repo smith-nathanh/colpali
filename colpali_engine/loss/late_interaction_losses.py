@@ -120,6 +120,14 @@ class ColbertPairwiseCELoss(torch.nn.Module):
             torch.einsum("bnd,csd->bcns", query_embeddings, doc_embeddings).max(dim=3)[0].sum(dim=2)
         )  # (batch_size, batch_size)
 
+        # Debug: Check embeddings and scores
+        debug = torch.rand(1).item() < 0.05  # 5% chance to debug
+        if debug:
+            print(f"Loss debug - query_shape: {query_embeddings.shape}, doc_shape: {doc_embeddings.shape}")
+            print(f"  query_mean: {query_embeddings.mean():.6f}, doc_mean: {doc_embeddings.mean():.6f}")
+            print(f"  scores_shape: {scores.shape}, scores_mean: {scores.mean():.6f}")
+            print(f"  scores_min: {scores.min():.6f}, scores_max: {scores.max():.6f}")
+
         # Positive scores are the diagonal of the scores matrix.
         pos_scores = scores.diagonal()  # (batch_size,)
 
@@ -129,6 +137,11 @@ class ColbertPairwiseCELoss(torch.nn.Module):
         neg_scores = scores - torch.eye(scores.shape[0], device=scores.device) * 1e6  # (batch_size, batch_size)
         neg_scores = neg_scores.max(dim=1)[0]  # (batch_size,)
 
+        # Debug: Check loss components
+        if debug:
+            print(f"  pos_scores: {pos_scores.mean():.6f}, neg_scores: {neg_scores.mean():.6f}")
+            print(f"  pos-neg diff: {(pos_scores - neg_scores).mean():.6f}")
+
         # Compute the loss
         # The loss is computed as the negative log of the softmax of the positive scores
         # relative to the negative scores.
@@ -136,6 +149,10 @@ class ColbertPairwiseCELoss(torch.nn.Module):
         # for numerical stability.
         # torch.vstack((pos_scores, neg_scores)).T.softmax(1)[:, 0].log()*(-1)
         loss = F.softplus(neg_scores - pos_scores).mean()
+
+        # Debug: Check final loss
+        if debug:
+            print(f"  final_loss: {loss.item():.6f}")
 
         return loss
 

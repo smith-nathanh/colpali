@@ -33,6 +33,12 @@ class ColModelTrainingConfig:
     peft_config: Optional[LoraConfig] = None
     loss_func: Optional[Callable] = ColbertLoss()
     pretrained_peft_model_name_or_path: Optional[str] = None
+    # Evaluation controls
+    full_corpus_eval: bool = True
+    doc_block_size: int = 64
+    compute_retrieval_metrics: bool = True
+    # Training mode control
+    train_only_linear: bool = False  # Train only output projection layer (linear or custom_text_proj)
     """
     Config class used for training a ColVision model.
     """
@@ -73,7 +79,7 @@ class ColModelTrainingConfig:
 
         # Enable training for all existing LoRA adapters
         if hasattr(self.model, "peft_config") and self.model.peft_config:
-            print("Found existing LoRA adapters. Setting all adapters to trainable.")
+            print("Found LoRA adapters. Setting all adapters to trainable.")
             for adapter_name in self.model.peft_config.keys():
                 # Set adapter to trainable
                 if hasattr(self.model, "set_adapter_trainable"):
@@ -83,6 +89,36 @@ class ColModelTrainingConfig:
                     for name, param in self.model.named_parameters():
                         if "lora_" in name.lower():
                             param.requires_grad = True
+
+        # Handle train_only_linear option when no PEFT config is provided
+        if self.peft_config is None and self.train_only_linear:
+            print("Training only the output projection layer. Freezing all other parameters.")
+            # First freeze all parameters
+            for param in self.model.parameters():
+                param.requires_grad = False
+
+            # Then unfreeze only the output projection layer
+            # Check for both naming conventions: 'linear' (ColIdefics3) and 'custom_text_proj' (most others)
+            projection_layer = None
+            projection_name = None
+
+            if hasattr(self.model, "linear"):
+                projection_layer = self.model.linear
+                projection_name = "linear"
+            elif hasattr(self.model, "custom_text_proj"):
+                projection_layer = self.model.custom_text_proj
+                projection_name = "custom_text_proj"
+
+            if projection_layer is not None:
+                for param in projection_layer.parameters():
+                    param.requires_grad = True
+                param_count = sum(p.numel() for p in projection_layer.parameters())
+                print(f"Enabled training for '{projection_name}' projection layer with {param_count:,} parameters")
+            else:
+                print(
+                    "Warning: No output projection layer ('linear' or 'custom_text_proj') found in model. "
+                    "All parameters remain frozen."
+                )
 
         # Always print trainable parameters at the end
         if hasattr(self.model, "print_trainable_parameters"):
@@ -148,6 +184,9 @@ class ColModelTraining:
             data_collator=self.collator,
             loss_func=self.config.loss_func,
             is_vision_model=self.config.processor is not None,
+            full_corpus_eval=self.config.full_corpus_eval,
+            doc_block_size=self.config.doc_block_size,
+            compute_retrieval_metrics=self.config.compute_retrieval_metrics,
         )
         # print which trainer is being used
         print(f"[SETUP] Using trainer: {type(trainer).__name__}")

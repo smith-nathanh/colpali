@@ -1,3 +1,4 @@
+from .fastvlm import ColFastVLM, ColFastVLMProcessor
 from .idefics3 import ColIdefics3, ColIdefics3Processor
 from .paligemma import BiPali, BiPaliProcessor, BiPaliProj, ColPali, ColPaliProcessor
 from .qwen2 import BiQwen2, BiQwen2Processor, ColQwen2, ColQwen2Processor

@@ -1,20 +1,20 @@
 config:
   (): colpali_engine.trainer.colmodel_training.ColModelTrainingConfig
-  output_dir: /gcs/colqwen-ns-models/colsmol-256-base
+  output_dir: /gcs/colqwen-ns-models/colsmol-500-linear
   processor:
     (): colpali_engine.utils.transformers_wrappers.AllPurposeWrapper
     class_to_instanciate: !ext colpali_engine.models.ColIdefics3Processor
-    pretrained_model_name_or_path: vidore/ColSmolVLM-Instruct-256M-base
+    pretrained_model_name_or_path:  HuggingFaceTB/SmolVLM-500M-Instruct
     # num_image_tokens: 2048
     # max_length: 50
 
   model:
     (): colpali_engine.utils.transformers_wrappers.AllPurposeWrapper
     class_to_instanciate: !ext colpali_engine.models.ColIdefics3
-    pretrained_model_name_or_path: vidore/ColSmolVLM-Instruct-256M-base
+    pretrained_model_name_or_path: HuggingFaceTB/SmolVLM-500M-Instruct
     torch_dtype:  !ext torch.bfloat16
     use_cache: false
-    attn_implementation: "flash_attention_2"
+    attn_implementation: flash_attention_2
 #    device_map: "auto"
 #    quantization_config:
 #      (): transformers.BitsAndBytesConfig
@@ -34,6 +34,10 @@ config:
 
   # max_length: 50
   run_eval: true
+  full_corpus_eval: true  # Full-corpus retrieval evaluation over the entire eval set
+  compute_retrieval_metrics: true
+  doc_block_size: 64 # Number of doc embeddings scored per block to control VRAM
+  train_only_linear: true  # Train only the linear projection layer
   loss_func:
     (): colpali_engine.loss.late_interaction_losses.ColbertPairwiseCELoss
   tr_args:
@@ -47,8 +51,8 @@ config:
     # gradient_checkpointing: true
     # 6 x 8 gpus = 48 batch size
     # gradient_accumulation_steps: 4
-    per_device_eval_batch_size: 4
-    eval_strategy: "steps"
+    per_device_eval_batch_size: 8
+    eval_strategy: steps
     dataloader_num_workers: 6
     # bf16: true
     save_steps: 500
@@ -60,18 +64,5 @@ config:
     #resume_from_checkpoint: true
     # optim: "paged_adamw_8bit"
     # wandb logging
-    # wandb_project: "colqwen2"
-    # run_name: "colqwen2-ba32-nolora"
-    report_to: "wandb"
-
-
-  peft_config:
-    (): peft.LoraConfig
-    r: 32
-    lora_alpha: 32
-    lora_dropout: 0.1
-    init_lora_weights: "gaussian"
-    bias: "none"
-    task_type: "FEATURE_EXTRACTION"
-    target_modules: '(.*(model.text_model).*(down_proj|gate_proj|up_proj|k_proj|q_proj|v_proj|o_proj).*$|.*(custom_text_proj).*$)'
-    # target_modules: '(.*(language_model).*(down_proj|gate_proj|up_proj|k_proj|q_proj|v_proj|o_proj).*$|.*(custom_text_proj).*$)'
+    run_name: colsmol-500-linear
+    report_to: wandb

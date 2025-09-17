@@ -11,6 +11,10 @@ resources:
     - region: us-east5
     - region: us-west1
     - region: us-west4
+  # Auto-terminate cluster 5 minutes after jobs complete
+#  autostop:
+#    idle_minutes: 5
+#    down: true  # Terminate instead of just stopping
 
 
 file_mounts:
@@ -184,14 +188,52 @@ setup: |
   echo 'export TORCH_CUDNN_V8_API_ENABLED=1' >> ~/.bashrc
 
   # Set environment variables for training
-  echo 'export WANDB_PROJECT="finance-colsmol"' >> ~/.bashrc
+  echo 'export WANDB_PROJECT="finance-fastvlm-500"' >> ~/.bashrc
   echo 'export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True' >> ~/.bashrc
   echo 'export USE_LOCAL_DATASET=0' >> ~/.bashrc
 
   echo "========== Distributed setup verification complete =========="
 
 run: |
-  echo "Starting ColBERT training..."
+  echo "Starting ColBERT training for all configs in scripts/configs/fastvlm/..."
   cd ~/sky_workdir
   source .env
-  accelerate launch scripts/train/train_colbert.py scripts/configs/idefics/train_colsmol-256-base.yaml
+  accelerate launch scripts/train/train_colbert.py scripts/configs/fastvlm/train_colfastvlm-500-base.yaml
+
+  # # Track job status
+  # FAILED_JOBS=""
+  # SUCCESSFUL_JOBS=""
+  # TOTAL_JOBS=0
+  
+  # # Run all configs in the lora directory
+  # for config in scripts/configs/qwen2_5/lora/*.yaml; do
+  #   TOTAL_JOBS=$((TOTAL_JOBS + 1))
+  #   echo "=========================================="
+  #   echo "Starting training with config: $config"
+  #   echo "Time: $(date)"
+  #   echo "=========================================="
+  #   accelerate launch scripts/train/train_colbert.py "$config"
+    
+  #   # Check if the training was successful
+  #   if [ $? -eq 0 ]; then
+  #     echo "✓ Successfully completed: $config"
+  #     SUCCESSFUL_JOBS="$SUCCESSFUL_JOBS\n  ✓ $config"
+  #   else
+  #     echo "✗ Failed: $config"
+  #     echo "Continuing with next config..."
+  #     FAILED_JOBS="$FAILED_JOBS\n  ✗ $config"
+  #   fi
+  #   echo ""
+  # done
+  
+  # echo "=========================================="
+  # echo "All training jobs completed at $(date)!"
+  # echo "Total jobs: $TOTAL_JOBS"
+  # echo -e "Successful jobs:$SUCCESSFUL_JOBS"
+  # echo -e "Failed jobs:$FAILED_JOBS"
+  # echo "=========================================="
+  
+  # echo ""
+  # echo "📊 Training complete! Cluster will auto-terminate in ~5 minutes."
+  # echo "   To keep the cluster alive, SSH in and run: sky autostop h100 --cancel"
+  # echo ""

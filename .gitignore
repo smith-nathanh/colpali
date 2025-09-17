@@ -173,3 +173,4 @@ cython_debug/
 *.ipynb
 
 notes.txt
+colpali_engine/models/idefics3/archive
