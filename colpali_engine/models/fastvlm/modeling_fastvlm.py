@@ -3,11 +3,15 @@
 Provides ColBERT-style multi-vector embeddings over FastVLM (LLaVA-Qwen2 based) models.
 """
 
+import warnings
+from types import MethodType
 from typing import ClassVar, Optional
 
 import torch
 from torch import nn
 from transformers import AutoModelForCausalLM
+
+from .llava_qwen import IMAGE_TOKEN_INDEX
 
 
 class ColFastVLM(nn.Module):
@@ -57,118 +61,94 @@ class ColFastVLM(nn.Module):
         # Remove unused arguments to avoid conflicts
         kwargs.pop("output_hidden_states", None)
         kwargs.pop("return_dict", None)
+        text_only_input_ids = kwargs.pop("text_input_ids", None)
 
         # Convert images to correct dtype if provided
         if images is not None:
-            images = images.to(dtype=self.model.dtype)
+            images = images.to(device=self.device, dtype=self.model.dtype)
 
         use_fused = images is not None and self.fuse_in_decoder
         visual_embeddings = None
-
-        # Debug: Check embeddings before normalization
-        debug = torch.rand(1).item() < 0.05  # 5% chance to debug
+        visual_mask = None
+        hidden = None
+        attn_mask = attention_mask
 
         if use_fused:
-            # When using fused processing, the LlavaQwen2 model expects images
-            # to be passed and will handle the fusion internally
+            cached_features = {"value": None}
+            original_encode = self.model.encode_images
+
+            def _encode_and_cache(model_self, imgs):
+                feats = original_encode(imgs)
+                cached_features["value"] = feats
+                return feats
+
+            self.model.encode_images = MethodType(_encode_and_cache, self.model)
             try:
-                outputs = self.model(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    position_ids=position_ids,
-                    past_key_values=past_key_values,
-                    inputs_embeds=inputs_embeds,
-                    labels=labels,
+                _, fused_position_ids, fused_attention_mask, fused_past_key_values, fused_inputs_embeds, _ = (
+                    self.model.prepare_inputs_labels_for_multimodal(
+                        input_ids=input_ids,
+                        position_ids=position_ids,
+                        attention_mask=attention_mask,
+                        past_key_values=past_key_values,
+                        labels=labels,
+                        images=images,
+                        image_sizes=image_sizes or self._infer_image_sizes(images),
+                    )
+                )
+
+                outputs = self.model.model(
+                    input_ids=None,
+                    attention_mask=fused_attention_mask,
+                    position_ids=fused_position_ids,
+                    past_key_values=fused_past_key_values,
+                    inputs_embeds=fused_inputs_embeds,
                     use_cache=use_cache,
                     output_attentions=output_attentions,
                     output_hidden_states=True,
-                    images=images,
-                    image_sizes=image_sizes,
                     return_dict=True,
-                    **kwargs,
                 )
                 hidden = outputs.hidden_states[-1]
-                attn_mask = attention_mask
-            except Exception as e:
-                import warnings
+                attn_mask = fused_attention_mask
+                visual_embeddings = cached_features["value"]
 
-                warnings.warn(
-                    f"Fused decoder path failed with error: {e}\n"
-                    f"Falling back to non-fused processing.\n"
-                    f"This may impact performance. Consider setting fuse_in_decoder=False."
-                )
-                # Fall back to non-fused processing
-                use_fused = False
-
-        if use_fused:
-            # Store the position where vision features start for masking
-            if hasattr(outputs, "vision_feature_positions"):
-                self._fused_visual_start = outputs.vision_feature_positions
-            elif input_ids is not None:
-                # Fallback: assume vision features come after text
-                self._fused_visual_start = input_ids.size(1)
-
-            # Debug fused path
-            if debug:
-                print(f"  Fused path - input_ids: {input_ids.size(1) if input_ids is not None else None}")
-                print(f"  Fused path - hidden: {hidden.shape}")
-                print(f"  Images provided: {images is not None}")
-                if images is not None:
-                    print(f"  Image shape: {images.shape}")
-
-            # Detect appended visual tokens (visual patches injected during multimodal prep)
-            if input_ids is not None and hidden.size(1) > input_ids.size(1):
-                extra = hidden.size(1) - input_ids.size(1)
-                if debug:
-                    print(f"  Visual tokens detected: {extra}")
-                if attention_mask is not None:
-                    extra_mask = torch.ones(
-                        attention_mask.size(0),
-                        extra,
-                        device=attention_mask.device,
-                        dtype=attention_mask.dtype,
+                if self.mask_non_image_embeddings and visual_embeddings is not None:
+                    visual_mask = self._build_visual_mask(
+                        input_ids=input_ids,
+                        input_attention_mask=attention_mask,
+                        new_attention_mask=fused_attention_mask,
+                        visual_features=visual_embeddings,
                     )
-                    attn_mask = torch.cat([attention_mask, extra_mask], dim=1)
-                self._fused_visual_start = hidden.size(1) - extra
-                self._fused_visual_count = extra
-            else:
-                if debug:
-                    print("  No visual tokens detected in fused path!")
-                    print("  This suggests FastVLM isn't processing images correctly")
+            except Exception as error:  # pragma: no cover - defensive fallback
+                warnings.warn(
+                    "Fused decoder path failed; falling back to non-fused FastVLM processing. "
+                    f"Set fuse_in_decoder=False to silence this warning.\nError: {error}"
+                )
+                use_fused = False
+                hidden = None
+                visual_embeddings = None
+                attn_mask = attention_mask
+            finally:
+                self.model.encode_images = original_encode
 
-        if not use_fused:
+        if hidden is None:
             if images is not None:
                 try:
-                    # Access the vision tower and projector correctly for LLaVA-Qwen2 architecture
-                    vision_tower = self.model.model.vision_tower
-                    mm_projector = self.model.model.mm_projector
-
-                    # Process images through vision tower
-                    # vision_tower expects images and returns features
-                    vision_outputs = vision_tower(images)
-
-                    # The vision tower output needs to be projected
-                    # mm_projector is a Sequential module (3072->896->896)
-                    visual_embeddings = mm_projector(vision_outputs)
-
-                    # Ensure correct shape (batch_size, num_patches, hidden_dim)
+                    visual_embeddings = self.model.encode_images(images)
                     if visual_embeddings.dim() == 2:
-                        # If we get (batch*patches, dim), reshape to (batch, patches, dim)
                         bsz = images.size(0)
                         npatch = visual_embeddings.size(0) // bsz
                         visual_embeddings = visual_embeddings.reshape(bsz, npatch, -1)
-                except (AttributeError, RuntimeError) as e:
-                    import warnings
-
+                except (AttributeError, RuntimeError) as error:  # pragma: no cover - defensive fallback
                     warnings.warn(
-                        f"Failed to process visual embeddings: {e}\n"
+                        f"Failed to process visual embeddings: {error}\n"
                         f"Vision tower available: {hasattr(self.model.model, 'vision_tower')}\n"
                         f"MM projector available: {hasattr(self.model.model, 'mm_projector')}\n"
-                        "Falling back to text-only mode."
+                        "Continuing in text-only mode."
                     )
                     visual_embeddings = None
+            text_input_ids = text_only_input_ids if text_only_input_ids is not None else input_ids
             text_out = self.model(
-                input_ids=input_ids,
+                input_ids=text_input_ids,
                 attention_mask=attention_mask,
                 position_ids=position_ids,
                 past_key_values=past_key_values,
@@ -195,61 +175,25 @@ class ColFastVLM(nn.Module):
                     attn_mask = torch.cat([attention_mask, vmask], dim=1)
                 else:
                     attn_mask = None
+                if self.mask_non_image_embeddings:
+                    visual_mask = torch.zeros(
+                        visual_embeddings.size(0),
+                        hidden.size(1),
+                        device=hidden.device,
+                        dtype=attn_mask.dtype if attn_mask is not None else hidden.dtype,
+                    )
+                    visual_mask[:, -visual_embeddings.size(1) :] = 1
             else:
                 hidden = text_hidden
                 attn_mask = attention_mask
 
         proj = self.custom_text_proj(hidden)
-
-        if debug:
-            print(f"FastVLM debug - proj_shape: {proj.shape}")
-            print(f"  proj_mean: {proj.mean():.6f}, proj_std: {proj.std():.6f}")
-            print(f"  proj_norm_mean: {proj.norm(dim=-1).mean():.6f}")
-
         proj = proj / proj.norm(dim=-1, keepdim=True)
-
         if attn_mask is not None:
-            proj = proj * attn_mask.unsqueeze(-1)
-            if debug:
-                print(f"  After masking - proj_mean: {proj.mean():.6f}")
-                print(f"  Non-zero tokens: {(attn_mask.sum(dim=1).float().mean()):.1f}")
-                print(f"  Images provided: {images is not None}")
-                if images is not None:
-                    print(f"  Visual masking will apply: {self.mask_non_image_embeddings}")
-                    if hasattr(self, "_fused_visual_start"):
-                        print(f"  Fused visual start: {self._fused_visual_start}, count: {self._fused_visual_count}")
-                    elif input_ids is not None:
-                        print(f"  Text len: {input_ids.size(1)}, proj len: {proj.size(1)}")
+            proj = proj * attn_mask.to(proj.dtype).unsqueeze(-1)
 
-        if (
-            self.mask_non_image_embeddings
-            and images is not None
-            and input_ids is not None
-            and proj.size(1) > input_ids.size(1)
-        ):
-            if use_fused and hasattr(self, "_fused_visual_start"):
-                start = self._fused_visual_start
-                mask_vec = torch.zeros_like(proj[:, :, 0])
-                mask_vec[:, start:] = 1.0
-                proj = proj * mask_vec.unsqueeze(-1)
-                if debug:
-                    print(
-                        f"  Applied fused visual mask: start={start}, kept {mask_vec.sum() / mask_vec.numel():.2%} tokens"
-                    )
-            else:
-                text_len = input_ids.size(1)
-                mask_vec = torch.zeros_like(proj[:, :, 0])
-                mask_vec[:, text_len:] = 1.0
-                proj = proj * mask_vec.unsqueeze(-1)
-                if debug:
-                    print(
-                        f"  Applied visual mask: text_len={text_len}, kept {mask_vec.sum() / mask_vec.numel():.2%} tokens"
-                    )
-                    visual_tokens = proj.size(1) - text_len
-                    print(f"  Visual tokens: {visual_tokens}")
-                    print(
-                        f"  Final proj stats: mean={proj.mean():.6f}, nonzero_frac={proj.abs().sum() / (proj.numel()):.2%}"
-                    )
+        if self.mask_non_image_embeddings and visual_mask is not None:
+            proj = proj * visual_mask.to(proj.dtype).unsqueeze(-1)
 
         return proj
 
@@ -308,3 +252,61 @@ class ColFastVLM(nn.Module):
     @property
     def dtype(self) -> torch.dtype:
         return next(self.parameters()).dtype
+
+    def _infer_image_sizes(self, images: Optional[torch.Tensor]) -> Optional[list[list[int]]]:
+        if images is None:
+            return None
+        if isinstance(images, torch.Tensor) and images.ndim == 4:
+            height, width = images.shape[-2:]
+            return [[int(width), int(height)] for _ in range(images.size(0))]
+        return None
+
+    def _build_visual_mask(
+        self,
+        *,
+        input_ids: Optional[torch.LongTensor],
+        input_attention_mask: Optional[torch.Tensor],
+        new_attention_mask: Optional[torch.Tensor],
+        visual_features: Optional[torch.Tensor],
+    ) -> Optional[torch.Tensor]:
+        if (
+            input_ids is None
+            or new_attention_mask is None
+            or visual_features is None
+            or not isinstance(visual_features, torch.Tensor)
+        ):
+            return None
+
+        if visual_features.dim() == 2:
+            visual_features = visual_features.unsqueeze(0)
+        if visual_features.dim() != 3:
+            return None
+
+        padding_side = getattr(self.model.config, "tokenizer_padding_side", "right")
+        sentinel = getattr(self.model.config, "image_token_index", IMAGE_TOKEN_INDEX)
+
+        batch_size, max_len = new_attention_mask.shape
+        mask = torch.zeros(batch_size, max_len, dtype=new_attention_mask.dtype, device=new_attention_mask.device)
+
+        for batch_idx in range(batch_size):
+            if input_attention_mask is None:
+                active_ids = input_ids[batch_idx]
+            else:
+                active_ids = input_ids[batch_idx][input_attention_mask[batch_idx].bool()]
+
+            image_positions = torch.where(active_ids == sentinel)[0].tolist()
+            if not image_positions:
+                continue
+
+            # Assume single visual asset per document (current data pipeline)
+            position = image_positions[0]
+            seq_len = int(new_attention_mask[batch_idx].sum().item())
+            start = max_len - seq_len if padding_side == "left" else 0
+            cursor = start + max(position, 0)
+
+            features = visual_features[min(batch_idx, visual_features.size(0) - 1)]
+            vision_len = features.shape[0]
+            end = min(cursor + vision_len, max_len)
+            mask[batch_idx, cursor:end] = 1
+
+        return mask if mask.any() else None

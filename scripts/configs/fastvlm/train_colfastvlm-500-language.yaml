@@ -7,6 +7,7 @@ config:
     class_to_instanciate: !ext colpali_engine.models.ColFastVLMProcessor
     pretrained_model_name_or_path: apple/FastVLM-0.5B
     trust_remote_code: true
+    use_fused_prompt: true
     
   model:
     (): colpali_engine.utils.transformers_wrappers.AllPurposeWrapper
@@ -15,10 +16,10 @@ config:
     torch_dtype: !ext torch.bfloat16
     trust_remote_code: true
     use_cache: false
-    #attn_implementation: "flash_attention_2"
+    attn_implementation: "flash_attention_2"
     # Retrieval-specific overrides
     mask_non_image_embeddings: true   # zero out prompt/text tokens for image-docs so only visual tokens contribute
-    fuse_in_decoder: false            # FIXED: Disable fused path to debug visual token generation
+    fuse_in_decoder: true
       
   #dataset_loading_func: !ext colpali_engine.utils.dataset_transformation.load_train_set
   #eval_dataset_loader: !import ../data/test_data.yaml
@@ -58,9 +59,9 @@ config:
     save_total_limit: 1
     # resume_from_checkpoint: true
     # optim: "paged_adamw_8bit"
-    #run_name: "colfastvlm-0.5b-base"
-    #report_to: "wandb"
-    
+    run_name: "colfastvlm-500-language"
+    report_to: "wandb"
+
   peft_config:
     (): peft.LoraConfig
     r: 32

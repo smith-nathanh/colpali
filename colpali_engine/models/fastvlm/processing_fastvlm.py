@@ -7,6 +7,8 @@ from transformers.processing_utils import ProcessorMixin
 
 from colpali_engine.utils.processing_utils import BaseVisualRetrieverProcessor
 
+from .llava_qwen import DEFAULT_IM_END_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IMAGE_TOKEN, IMAGE_TOKEN_INDEX
+
 
 class ColFastVLMProcessor(BaseVisualRetrieverProcessor, ProcessorMixin):
     """
@@ -25,16 +27,16 @@ class ColFastVLMProcessor(BaseVisualRetrieverProcessor, ProcessorMixin):
     query_prefix: ClassVar[str] = "Query: "
     query_augmentation_token: ClassVar[str] = " "  # Simple space for padding
     # FastVLM (LLaVA-Qwen style) special tokens
-    image_token: ClassVar[str] = "<image>"
-    im_start_token: ClassVar[str] = "<im_start>"
-    im_end_token: ClassVar[str] = "<im_end>"
+    image_token: ClassVar[str] = DEFAULT_IMAGE_TOKEN
+    im_start_token: ClassVar[str] = DEFAULT_IM_START_TOKEN
+    im_end_token: ClassVar[str] = DEFAULT_IM_END_TOKEN
     # Fused visual prompt pattern
     fused_visual_prompt_template: ClassVar[str] = "{im_start}{image}{im_end}Describe the image."
 
     def __init__(
         self,
         pretrained_model_name_or_path: str = "apple/FastVLM-0.5B",
-        use_fused_prompt: bool = False,
+        use_fused_prompt: bool = True,
         **kwargs,
     ):
         # FastVLM doesn't have a unified processor, so we need to load components separately
@@ -65,7 +67,7 @@ class ColFastVLMProcessor(BaseVisualRetrieverProcessor, ProcessorMixin):
             self.tokenizer.padding_side = "left"
 
         self.use_fused_prompt = use_fused_prompt
-        if self.use_fused_prompt and hasattr(self.tokenizer, "add_tokens"):
+        if hasattr(self.tokenizer, "add_tokens"):
             needed = [
                 t
                 for t in [self.image_token, self.im_start_token, self.im_end_token]
@@ -145,6 +147,21 @@ class ColFastVLMProcessor(BaseVisualRetrieverProcessor, ProcessorMixin):
             return_tensors="pt",
             padding="longest",
         )
+
+        original_input_ids = text_inputs["input_ids"].clone()
+
+        if self.use_fused_prompt:
+            image_token_id = self.tokenizer.convert_tokens_to_ids(self.image_token)
+            if image_token_id == self.tokenizer.unk_token_id:
+                raise ValueError(
+                    "FastVLM tokenizer does not recognize the image token. "
+                    "Ensure additional special tokens are registered."
+                )
+            input_ids = text_inputs["input_ids"].clone()
+            input_ids[input_ids == image_token_id] = IMAGE_TOKEN_INDEX
+            text_inputs["input_ids"] = input_ids
+
+        text_inputs["text_input_ids"] = original_input_ids
 
         # Process images
         image_inputs = self.image_processor(images, return_tensors="pt")
