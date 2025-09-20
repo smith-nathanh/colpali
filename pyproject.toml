@@ -39,10 +39,8 @@ dependencies = [
     "pillow>=10.0.0",
     "requests",
     "scipy",
-    "timm>=1.0.19",
     "torch>=2.6.0,<2.7.0",
     "transformers>=4.51.1,<4.52.0",
-    "wandb>=0.21.4",
 ]
 
 [project.optional-dependencies]
@@ -54,7 +52,9 @@ train = [
     "mteb>=1.16.3,<2",
     "pillow>=10.0.0,<11.3.0",
     "skypilot[gcp]>=0.9.3",
+    "timm>=1.0.19",
     "typer>=0.15.1",
+    "wandb>=0.21.4",
 ]
 
 interpretability = [
@@ -73,6 +73,11 @@ all = [
 
 [project.urls]
 homepage = "https://github.com/illuin-tech/colpali"
+
+[dependency-groups]
+train = [
+    "ray[tune]>=2.49.1",
+]
 
 [tool.pytest.ini_options]
 filterwarnings = ["ignore::Warning"]

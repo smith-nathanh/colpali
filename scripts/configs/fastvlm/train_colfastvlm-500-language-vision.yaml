@@ -1,6 +1,6 @@
 config:
   (): colpali_engine.trainer.colmodel_training.ColModelTrainingConfig
-  output_dir: ./outputs/colfastvlm-500-language-vision
+  output_dir: /gcs/colqwen-ns-models/colfastvlm-500-language-vision
 
   processor:
     (): colpali_engine.utils.transformers_wrappers.AllPurposeWrapper

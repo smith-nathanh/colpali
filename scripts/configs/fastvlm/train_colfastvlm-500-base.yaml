@@ -1,6 +1,6 @@
 config:
   (): colpali_engine.trainer.colmodel_training.ColModelTrainingConfig
-  output_dir: ./outputs/colfastvlm-500-base
+  output_dir: /gcs/colqwen-ns-models/colfastvlm-500-base
 
   processor:
     (): colpali_engine.utils.transformers_wrappers.AllPurposeWrapper
@@ -19,7 +19,7 @@ config:
     attn_implementation: "flash_attention_2"
     # Retrieval-specific overrides
     mask_non_image_embeddings: true   # zero out prompt/text tokens for image-docs so only visual tokens contribute
-    fuse_in_decoder: true             # Enable fused multimodal path now that FastVLM masking is stable
+    fuse_in_decoder: true
       
   #dataset_loading_func: !ext colpali_engine.utils.dataset_transformation.load_train_set
   #eval_dataset_loader: !import ../data/test_data.yaml

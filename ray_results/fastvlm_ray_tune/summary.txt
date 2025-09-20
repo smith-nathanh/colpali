@@ -1,0 +1,18 @@
+Experiment: fastvlm_ray_tune | Metric: eval_ndcg@5 (max) | Trials: 50
+---------------------------------------------------------------------
+Rank  Trial ID        Status               Best     Step  Last It
+1     run_trial_c4510_00005_5_gradient_accumulation_steps=1,learning_rate=0.0003,per_device_train_batch_size=16,warmup_steps=200_2025-09-20_00-38-29 UNKNOWN          0.963312       60       60
+2     run_trial_c4510_00023_23_gradient_accumulation_steps=1,learning_rate=0.0001,per_device_train_batch_size=8,warmup_steps=200_2025-09-20_01-07-24 UNKNOWN          0.958480      119      119
+3     run_trial_c4510_00014_14_gradient_accumulation_steps=1,learning_rate=0.0001,per_device_train_batch_size=8,warmup_steps=100_2025-09-20_00-52-33 UNKNOWN          0.957765      119      119
+4     run_trial_c4510_00001_1_gradient_accumulation_steps=1,learning_rate=0.0001,per_device_train_batch_size=8,warmup_steps=200_2025-09-20_00-30-46 UNKNOWN          0.955314      119      119
+5     run_trial_c4510_00010_10_gradient_accumulation_steps=1,learning_rate=0.0001,per_device_train_batch_size=8,warmup_steps=200_2025-09-20_00-45-49 UNKNOWN          0.930165      100      100
+6     run_trial_c4510_00016_16_gradient_accumulation_steps=2,learning_rate=0.0001,per_device_train_batch_size=16,warmup_steps=50_2025-09-20_00-57-04 UNKNOWN          0.910643       30       30
+7     run_trial_c4510_00018_18_gradient_accumulation_steps=1,learning_rate=0.0001,per_device_train_batch_size=32,warmup_steps=50_2025-09-20_00-59-59 UNKNOWN          0.909953       30       30
+8     run_trial_c4510_00003_3_gradient_accumulation_steps=4,learning_rate=0.0002,per_device_train_batch_size=8,warmup_steps=200_2025-09-20_00-35-04 UNKNOWN          0.885450       30       30
+9     run_trial_c4510_00021_21_gradient_accumulation_steps=1,learning_rate=0.0001,per_device_train_batch_size=32,warmup_steps=100_2025-09-20_01-04-27 UNKNOWN          0.884335       30       30
+10    run_trial_c4510_00000_0_gradient_accumulation_steps=4,learning_rate=0.0001,per_device_train_batch_size=8,warmup_steps=100_2025-09-20_00-28-44 UNKNOWN          0.872027       30       30
+
+Best trial: run_trial_c4510_00005_5_gradient_accumulation_steps=1,learning_rate=0.0003,per_device_train_batch_size=16,warmup_steps=200_2025-09-20_00-38-29 (UNKNOWN)
+Best eval_ndcg@5: 0.963312 at step 60
+Config:
+{}
