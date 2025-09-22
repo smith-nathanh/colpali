@@ -18,11 +18,17 @@ def load_train_set(dataset_path: str = "smith-nathanh/finance-dataset") -> ColPa
     return train_dataset
 
 
-def load_eval_set(dataset_path: str = "smith-nathanh/finance-dataset") -> ColPaliEngineDataset:
+def load_eval_set(
+    dataset_path: str = "smith-nathanh/finance-dataset", split: str = "validation"
+) -> ColPaliEngineDataset:
     """
-    Loads the evaluation set from the specified dataset path.
+    Loads the evaluation set from the specified dataset path and split.
+
+    Args:
+        dataset_path: Path to the dataset (local or HuggingFace repo)
+        split: Dataset split name to load (e.g., "validation", "test")
     """
-    dataset = load_dataset(dataset_path, split="validation")
+    dataset = load_dataset(dataset_path, split=split)
     eval_dataset = ColPaliEngineDataset(dataset, pos_target_column_name="image")
     return eval_dataset
 

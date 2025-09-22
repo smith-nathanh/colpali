@@ -174,3 +174,4 @@ cython_debug/
 
 notes.txt
 colpali_engine/models/idefics3/archive
+ray_results

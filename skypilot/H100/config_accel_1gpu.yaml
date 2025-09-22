@@ -188,7 +188,7 @@ setup: |
   echo 'export TORCH_CUDNN_V8_API_ENABLED=1' >> ~/.bashrc
 
   # Set environment variables for training
-  echo 'export WANDB_PROJECT="finance-fastvlm-500-ray"' >> ~/.bashrc
+  echo 'export WANDB_PROJECT="vidore-fastvlm-500-ray"' >> ~/.bashrc
   echo 'export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True' >> ~/.bashrc
   echo 'export USE_LOCAL_DATASET=0' >> ~/.bashrc
 
@@ -202,25 +202,33 @@ run: |
   set -a && source .env && set +a
   [ -z "$WANDB_API_KEY" ] && echo "ERROR: WANDB_API_KEY not found in .env" && exit 1
   echo "✓ WANDB_API_KEY loaded"
-  export WANDB_PROJECT="finance-fastvlm-500-lora"
+
+  python scripts/train/tune_fastvlm.py \
+    scripts/configs/fastvlm/train_colfastvlm-500-vidore-full.yaml \
+    --num-samples 24 \
+    --max-steps 1000 \
+    --metric eval_ndcg@5 \
+    --mode max \
+    --enable-full-corpus-eval \
+    --enable-retrieval-metrics
   
   # python scripts/train/tune_fastvlm.py \
   #   scripts/configs/fastvlm/train_colfastvlm-500-base.yaml \
-  #   --experiment-name fastvlm-500-ray-2 \
+  #   --experiment-name $WANDB_PROJECT \
   #   --num-samples 24 \
   #   --cpus-per-trial 8 \
   #   --gpus-per-trial 1 \
   #   --max-concurrent-trials 1 \
   #   --train-epochs 2 \
   #   --enable-full-corpus-eval \
-  #   --eval-steps 10 \
-  #   --scheduler-max-t 500 \
-  #   --scheduler-grace-period 80 \
-  #   --reduction-factor 3 \
+  #   --eval-steps 20 \
+  #   --scheduler-max-t 480 \
+  #   --scheduler-grace-period 40 \
+  #   --reduction-factor 2 \
   #   --local-dir /gcs/colqwen-ns-models/ray_results \
   #   --skip-save
 
-  accelerate launch scripts/train/train_colbert.py scripts/configs/fastvlm/train_colfastvlm-500-ray-best.yaml
+  # accelerate launch scripts/train/train_colbert.py scripts/configs/fastvlm/train_colfastvlm-500-vidore-full.yaml
 
   # # Track job status
   # FAILED_JOBS=""

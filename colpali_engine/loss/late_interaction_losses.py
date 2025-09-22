@@ -121,7 +121,7 @@ class ColbertPairwiseCELoss(torch.nn.Module):
         )  # (batch_size, batch_size)
 
         # Debug: Check embeddings and scores
-        debug = torch.rand(1).item() < 0.05  # 5% chance to debug
+        debug = False # torch.rand(1).item() < 0.05  # 5% chance to debug
         if debug:
             print(f"Loss debug - query_shape: {query_embeddings.shape}, doc_shape: {doc_embeddings.shape}")
             print(f"  query_mean: {query_embeddings.mean():.6f}, doc_mean: {doc_embeddings.mean():.6f}")

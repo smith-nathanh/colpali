@@ -64,7 +64,11 @@ def apply_trial_overrides(
         tr_args.per_device_train_batch_size = int(overrides["per_device_train_batch_size"])
     if "gradient_accumulation_steps" in overrides:
         tr_args.gradient_accumulation_steps = int(overrides["gradient_accumulation_steps"])
-    if "warmup_steps" in overrides:
+    if "warmup_ratio" in overrides:
+        tr_args.warmup_ratio = float(overrides["warmup_ratio"])
+        # Clear any step-based warmup from the base config so the ratio governs the schedule.
+        tr_args.warmup_steps = 0
+    elif "warmup_steps" in overrides:
         tr_args.warmup_steps = int(overrides["warmup_steps"])
     if config.peft_config is not None:
         if "lora_r" in overrides:
@@ -147,10 +151,9 @@ def run_trial(
 
 def default_search_space() -> Dict[str, Any]:
     return {
-        "learning_rate": tune.loguniform(5e-5, 4e-4),
-        "per_device_train_batch_size": tune.choice([8, 16, 32, 64, 128]),
-        "gradient_accumulation_steps": tune.choice([1, 2, 4]),
-        "warmup_steps": tune.choice([50, 100, 200]),
+        "learning_rate": tune.loguniform(5e-5, 5e-4),
+        "per_device_train_batch_size": tune.choice([16, 32]),
+        "warmup_ratio": tune.choice([0.02, 0.05, 0.1]),
         # "lora_r": tune.choice([16, 32, 48]),
         # "lora_alpha": tune.choice([16, 32, 64]),
         # "lora_dropout": tune.choice([0.05, 0.1, 0.15]),
@@ -185,20 +188,20 @@ def main(
     scheduler_grace_period: int = typer.Option(150, "--scheduler-grace-period", help="ASHA grace period."),
     reduction_factor: int = typer.Option(3, "--reduction-factor", help="ASHA reduction factor."),
     train_epochs: Optional[float] = typer.Option(
-        0.5,
+        None,
         "--train-epochs",
-        help="Override number of epochs per trial (set to null to keep YAML value).",
+        help="Override number of epochs per trial (omit or set to 'none' to keep YAML value).",
     ),
     max_steps: Optional[int] = typer.Option(None, "--max-steps", help="Optional max training steps per trial."),
-    disable_full_corpus_eval: bool = typer.Option(
-        True,
-        "--disable-full-corpus-eval/--enable-full-corpus-eval",
-        help="Toggle full corpus retrieval eval during tuning.",
-    ),
-    disable_retrieval_metrics: bool = typer.Option(
+    full_corpus_eval: bool = typer.Option(
         False,
-        "--disable-retrieval-metrics/--enable-retrieval-metrics",
-        help="Skip retrieval metrics computation to speed up trials.",
+        "--full-corpus-eval/--no-full-corpus-eval",
+        help="Run retrieval metrics against the entire eval corpus (slower).",
+    ),
+    retrieval_metrics: bool = typer.Option(
+        True,
+        "--retrieval-metrics/--no-retrieval-metrics",
+        help="Compute retrieval metrics during tuning.",
     ),
     skip_save: bool = typer.Option(
         True,
@@ -218,7 +221,7 @@ def main(
     except FileNotFoundError as exc:
         raise typer.BadParameter(f"Config file '{config_file}' does not exist.") from exc
 
-    local_dir = local_dir.expanduser()
+    local_dir = local_dir.expanduser().resolve()
 
     if ray_address:
         ray.init(address=ray_address)
@@ -237,8 +240,8 @@ def main(
     static_overrides = {
         "num_train_epochs": train_epochs,
         "max_steps": max_steps,
-        "full_corpus_eval": not disable_full_corpus_eval,
-        "compute_retrieval_metrics": not disable_retrieval_metrics,
+        "full_corpus_eval": full_corpus_eval,
+        "compute_retrieval_metrics": retrieval_metrics,
         "eval_steps": eval_steps_override,
     }
 

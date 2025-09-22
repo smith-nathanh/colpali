@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import math
 import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -95,7 +96,9 @@ def _load_trial_summary(
             params = json.loads(params_path.read_text())
         except json.JSONDecodeError as exc:
             typer.echo(f"Warning: could not parse {params_path}: {exc}", err=True)
-    config = params.get("config", {})
+
+    # Try to get config from nested structure first, then fall back to params directly
+    config = params.get("config", params if params else {})
     trial_id = params.get("trial_id", trial_dir.name)
     trial_name = params.get("trial_name", trial_dir.name)
 
@@ -168,6 +171,120 @@ def _is_remote_path(path: Path) -> bool:
     return str(path).startswith("/gcs/")
 
 
+def _is_gcs_bucket_path(path: Path) -> bool:
+    """Check if path looks like a GCS bucket (gs://) rather than a mounted /gcs/ path."""
+    return str(path).startswith("gs://")
+
+
+def _convert_gcs_mount_to_bucket(path: Path) -> str:
+    """Convert /gcs/bucket-name/path to gs://bucket-name/path."""
+    path_str = str(path)
+    if path_str.startswith("/gcs/"):
+        return "gs://" + path_str[5:]  # Remove "/gcs/" and add "gs://"
+    return path_str
+
+
+def _run_gsutil_command(args: List[str]) -> subprocess.CompletedProcess:
+    """Run a gsutil command and return the result."""
+    cmd = ["gsutil"] + args
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        return result
+    except subprocess.CalledProcessError as e:
+        raise typer.Exit(f"gsutil command failed: {' '.join(cmd)}\nError: {e.stderr}")
+    except FileNotFoundError:
+        raise typer.Exit("gsutil command not found. Please install Google Cloud SDK.")
+
+
+def _gcs_list_directory(gcs_path: str) -> List[str]:
+    """List contents of a GCS directory."""
+    result = _run_gsutil_command(["ls", gcs_path])
+    return [line.strip() for line in result.stdout.strip().split("\n") if line.strip()]
+
+
+def _gcs_file_exists(gcs_path: str) -> bool:
+    """Check if a file exists in GCS."""
+    try:
+        _run_gsutil_command(["stat", gcs_path])
+        return True
+    except typer.Exit:
+        return False
+
+
+def _sync_gcs_experiment_dir(gcs_path: str, local_cache: Path, experiment_name: str) -> Path:
+    """Copy select trial metadata from a GCS experiment directory into a local cache."""
+    local_cache = local_cache.expanduser().resolve()
+    local_cache.mkdir(parents=True, exist_ok=True)
+
+    local_exp_dir = local_cache / experiment_name
+    if local_exp_dir.exists():
+        raise typer.BadParameter(
+            f"Experiment directory '{local_exp_dir}' already exists locally; "
+            f"remove it or choose a different --local-cache."
+        )
+
+    try:
+        _copy_gcs_experiment_metadata(gcs_path, local_exp_dir)
+    except Exception:
+        if local_exp_dir.exists():
+            shutil.rmtree(local_exp_dir, ignore_errors=True)
+        raise
+
+    return local_exp_dir
+
+
+def _copy_gcs_experiment_metadata(gcs_exp_dir: str, local_exp_dir: Path) -> None:
+    """Copy only the small tracking files required for scoring summaries from GCS."""
+    local_exp_dir.mkdir(parents=True, exist_ok=False)
+
+    # Ensure gcs_exp_dir ends with /
+    if not gcs_exp_dir.endswith("/"):
+        gcs_exp_dir += "/"
+
+    # Copy experiment-level files
+    exp_files = ["experiment_state_latest.json", "tuner.pkl"]
+    for pattern in ["experiment_state*.json", "basic-variant-state*.json"]:
+        try:
+            result = _run_gsutil_command(["ls", gcs_exp_dir + pattern])
+            for line in result.stdout.strip().split("\n"):
+                if line.strip():
+                    exp_files.append(Path(line.strip()).name)
+        except typer.Exit:
+            pass  # Pattern not found, continue
+
+    for filename in set(exp_files):  # Remove duplicates
+        gcs_file_path = gcs_exp_dir + filename
+        if _gcs_file_exists(gcs_file_path):
+            local_file_path = local_exp_dir / filename
+            _run_gsutil_command(["cp", gcs_file_path, str(local_file_path)])
+
+    # Copy trial-level metadata files
+    trial_files = ["result.json", "progress.csv", "params.json", "params.pkl", "error.txt"]
+
+    # List all trial directories
+    try:
+        trial_dirs = _gcs_list_directory(gcs_exp_dir)
+        for trial_dir_path in trial_dirs:
+            if trial_dir_path.endswith("/") and "run_trial_" in trial_dir_path:
+                trial_name = Path(trial_dir_path.rstrip("/")).name
+                local_trial_dir = local_exp_dir / trial_name
+
+                files_to_copy = []
+                for filename in trial_files:
+                    trial_file_path = trial_dir_path + filename
+                    if _gcs_file_exists(trial_file_path):
+                        files_to_copy.append(filename)
+
+                if files_to_copy:
+                    local_trial_dir.mkdir(parents=False, exist_ok=False)
+                    for filename in files_to_copy:
+                        gcs_file_path = trial_dir_path + filename
+                        local_file_path = local_trial_dir / filename
+                        _run_gsutil_command(["cp", gcs_file_path, str(local_file_path)])
+    except typer.Exit:
+        pass  # No trial directories found
+
+
 def _sync_experiment_dir(remote_exp_dir: Path, local_cache: Path) -> Path:
     """Copy select trial metadata from a remote experiment directory into a local cache."""
     local_cache = local_cache.expanduser().resolve()
@@ -176,7 +293,8 @@ def _sync_experiment_dir(remote_exp_dir: Path, local_cache: Path) -> Path:
     local_exp_dir = local_cache / remote_exp_dir.name
     if local_exp_dir.exists():
         raise typer.BadParameter(
-            f"Experiment directory '{local_exp_dir}' already exists locally; remove it or choose a different --local-cache.")
+            f"Experiment directory '{local_exp_dir}' already exists locally; remove it or choose a different --local-cache."
+        )
 
     try:
         _copy_experiment_metadata(remote_exp_dir, local_exp_dir)
@@ -215,6 +333,7 @@ def _copy_experiment_metadata(remote_exp_dir: Path, local_exp_dir: Path) -> None
         for filename in files_to_copy:
             shutil.copy2(trial_dir / filename, local_trial_dir / filename)
 
+
 @app.command()
 def summarize(
     results_root: Path = typer.Argument(..., help="Root directory containing Ray Tune experiment folders."),
@@ -250,14 +369,30 @@ def summarize(
     """Print a summary table for a Ray Tune experiment."""
 
     results_root = results_root.expanduser().resolve()
-    if not results_root.exists():
-        raise typer.BadParameter(f"Results root '{results_root}' does not exist.")
 
-    exp_dir = _discover_experiment_dir(results_root, experiment)
-
+    # Check if it's a remote path first, before checking local existence
     if _is_remote_path(results_root):
-        exp_dir = _sync_experiment_dir(exp_dir, local_cache)
+        # Convert /gcs/ mount path to gs:// bucket path for gsutil
+        gcs_bucket_path = _convert_gcs_mount_to_bucket(results_root)
+        if not experiment:
+            raise typer.BadParameter("--experiment must be specified for GCS paths.")
+
+        gcs_exp_path = gcs_bucket_path.rstrip("/") + "/" + experiment
+        if not gcs_exp_path.endswith("/"):
+            gcs_exp_path += "/"
+
+        # Check if experiment exists in GCS
+        try:
+            _gcs_list_directory(gcs_exp_path)
+        except typer.Exit:
+            raise typer.BadParameter(f"Experiment directory '{gcs_exp_path}' does not exist.")
+
+        exp_dir = _sync_gcs_experiment_dir(gcs_exp_path, local_cache, experiment)
         typer.echo(f"Synced remote experiment to {exp_dir}", err=True)
+    else:
+        if not results_root.exists():
+            raise typer.BadParameter(f"Results root '{results_root}' does not exist.")
+        exp_dir = _discover_experiment_dir(results_root, experiment)
 
     maximize = mode.lower() == "max"
     if mode.lower() not in {"max", "min"}:
