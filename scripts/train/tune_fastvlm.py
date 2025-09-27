@@ -119,6 +119,10 @@ def run_trial(
         config.full_corpus_eval = bool(static_overrides["full_corpus_eval"])
     if static_overrides.get("compute_retrieval_metrics") is not None:
         config.compute_retrieval_metrics = bool(static_overrides["compute_retrieval_metrics"])
+    if static_overrides.get("eval_steps") is not None:
+        config.tr_args.eval_steps = int(static_overrides["eval_steps"])
+    if static_overrides.get("logging_steps") is not None:
+        config.tr_args.logging_steps = int(static_overrides["logging_steps"])
 
     apply_trial_overrides(config, trial_config)
 

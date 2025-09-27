@@ -11,10 +11,10 @@ resources:
     - region: us-east5
     - region: us-west1
     - region: us-west4
-  # Auto-terminate cluster 5 minutes after jobs complete
-#  autostop:
-#    idle_minutes: 5
-#    down: true  # Terminate instead of just stopping
+  # Auto-terminate cluster
+  autostop:
+   idle_minutes: 10
+   down: true  # Terminate instead of just stopping
 
 
 file_mounts:
@@ -188,7 +188,7 @@ setup: |
   echo 'export TORCH_CUDNN_V8_API_ENABLED=1' >> ~/.bashrc
 
   # Set environment variables for training
-  echo 'export WANDB_PROJECT="vidore-fastvlm-500-ray"' >> ~/.bashrc
+  echo 'export WANDB_PROJECT="vidore-fastvlm-500"' >> ~/.bashrc
   echo 'export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True' >> ~/.bashrc
   echo 'export USE_LOCAL_DATASET=0' >> ~/.bashrc
 
@@ -203,14 +203,16 @@ run: |
   [ -z "$WANDB_API_KEY" ] && echo "ERROR: WANDB_API_KEY not found in .env" && exit 1
   echo "✓ WANDB_API_KEY loaded"
 
-  python scripts/train/tune_fastvlm.py \
-    scripts/configs/fastvlm/train_colfastvlm-500-vidore-full.yaml \
-    --num-samples 24 \
-    --max-steps 1000 \
-    --metric eval_ndcg@5 \
-    --mode max \
-    --enable-full-corpus-eval \
-    --enable-retrieval-metrics
+  # python scripts/train/tune_fastvlm.py \
+  #   scripts/configs/fastvlm/train_colfastvlm-500-vidore-full.yaml \
+  #   --num-samples 24 \
+  #   --max-steps 1000 \
+  #   --metric eval_ndcg@5 \
+  #   --mode max \
+  #   --full-corpus-eval \
+  #   --retrieval-metrics \
+  #   --eval-steps 100 \
+  #   --local-dir /gcs/colqwen-ns-models/ray_results
   
   # python scripts/train/tune_fastvlm.py \
   #   scripts/configs/fastvlm/train_colfastvlm-500-base.yaml \
@@ -228,7 +230,7 @@ run: |
   #   --local-dir /gcs/colqwen-ns-models/ray_results \
   #   --skip-save
 
-  # accelerate launch scripts/train/train_colbert.py scripts/configs/fastvlm/train_colfastvlm-500-vidore-full.yaml
+  accelerate launch scripts/train/train_colbert.py scripts/configs/fastvlm/train_colfastvlm-500-vidore-ray-short-best-2.yaml
 
   # # Track job status
   # FAILED_JOBS=""
